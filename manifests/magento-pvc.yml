@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: magento-app-etc-pvc
+  namespace: magento
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: magento-var-pvc
+  namespace: magento
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: magento-generated-pvc
+  namespace: magento
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

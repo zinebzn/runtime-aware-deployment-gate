@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mariadb-pvc
+  namespace: magento
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb
+  namespace: magento
+spec:
+  serviceName: mariadb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:10.6
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: mariadb-root-password
+        - name: MARIADB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: mariadb-database
+        - name: MARIADB_USER
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: mariadb-user
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: mariadb-password
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: mariadb-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  namespace: magento
+spec:
+  ports:
+  - port: 3306
+  selector:
+    app: mariadb

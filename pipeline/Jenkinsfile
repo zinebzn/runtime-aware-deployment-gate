@@ -1,0 +1,133 @@
+pipeline {
+    agent any
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
+    environment {
+        REGISTRY  = "registry.digitalocean.com/jenkinscontainer"
+        IMAGE_NAME = "magento"
+        IMAGE_TAG  = "latest"
+
+        PROM_URL = "http://host.docker.internal:9090"
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                deleteDir()
+            }
+        }
+
+        stage('Checkout SCM') {
+            steps {
+                git branch: 'main',
+                    credentialsId: 'gitlab-token',
+                    url: 'https://gitlab.com/zineb.naji-group/zineb.naji-project.git'
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh '''
+                  docker build \
+                    --platform=linux/amd64 \
+                    -t $REGISTRY/$IMAGE_NAME:$IMAGE_TAG docker/
+                '''
+            }
+        }
+
+   stage('Login to DOCR') {
+    steps {
+        withCredentials([string(credentialsId: 'do-token', variable: 'DO_TOKEN')]) {
+            sh '''
+              echo "$DO_TOKEN" | docker login registry.digitalocean.com -u doctl --password-stdin
+            '''
+        }
+    }
+}
+
+        stage('Push Image') {
+            steps {
+                sh '''
+                  docker push $REGISTRY/$IMAGE_NAME:$IMAGE_TAG
+                '''
+            }
+        }
+
+        stage('Adaptive Health Gate') {
+    steps {
+        script {
+
+            // ---------------- CPU ----------------
+            def cpu = sh(
+                script: """
+                curl -s "${PROM_URL}/api/v1/query" \
+                --data-urlencode 'query=sum(rate(container_cpu_usage_seconds_total{namespace="magento",container!=""}[2m]))' \
+                | jq -r '.data.result[0].value[1] // "0"'
+                """,
+                returnStdout: true
+            ).trim().toFloat()
+
+            // ---------------- Error Rate ----------------
+            def errorRate = sh(
+                script: """
+                curl -s "${PROM_URL}/api/v1/query" \
+                --data-urlencode 'query=sum(rate(nginx_ingress_controller_requests{status!~"2.."}[2m])) / sum(rate(nginx_ingress_controller_requests[2m]))' \
+                | jq -r '.data.result[0].value[1] // "0"'
+                """,
+                returnStdout: true
+            ).trim().toFloat()
+
+            // ---------------- HPA Saturation ----------------
+            def hpaRatio = sh(
+                script: """
+                curl -s "${PROM_URL}/api/v1/query" \
+                --data-urlencode 'query=kube_horizontalpodautoscaler_status_current_replicas{horizontalpodautoscaler="magento-hpa"} / kube_horizontalpodautoscaler_spec_max_replicas{horizontalpodautoscaler="magento-hpa"}' \
+                | jq -r '.data.result[0].value[1] // "0"'
+                """,
+                returnStdout: true
+            ).trim().toFloat()
+
+            echo "Health Metrics → CPU=${cpu}, ErrorRate=${errorRate}, HPASaturation=${hpaRatio}"
+
+            def block = false
+
+            if (cpu > 0.7) {
+                echo "Block reason: CPU too high"
+                block = true
+            }
+
+            if (errorRate > 0.02) {
+                echo "Block reason: Error rate too high"
+                block = true
+            }
+
+            if (hpaRatio > 0.9) {
+                echo "Block reason: HPA saturated"
+                block = true
+            }
+
+            if (block) {
+                error("Deployment blocked by Adaptive Health Gate")
+            }
+
+            echo "Adaptive Health Gate passed"
+        }
+    }
+}
+
+
+        stage('Deploy to Kubernetes (Adaptive)') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig-magento', variable: 'KUBECONFIG')]) {
+                    sh '''
+                      kubectl rollout restart deployment magento -n magento
+                    '''
+                }
+            }
+        }
+    }
+}

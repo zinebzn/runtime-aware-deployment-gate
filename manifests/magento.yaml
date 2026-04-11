@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: magento
+  namespace: magento
+spec:
+  replicas: 2
+  strategy:
+    # type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: magento
+
+  template:
+    metadata:
+      labels:
+        app: magento
+    spec:
+      securityContext:
+        fsGroup: 33
+
+      initContainers:
+      - name: magento-bootstrap
+        image: alexcheng/magento2:2.1
+        command:
+          - sh
+          - -c
+          - |
+            echo "Bootstrapping Magento volumes..."
+
+            mkdir -p /mnt/app-etc /mnt/var /mnt/generated
+
+            if [ -d /var/www/html/app/etc ]; then
+              cp -R /var/www/html/app/etc/* /mnt/app-etc/ || true
+            fi
+
+            chown -R 33:33 /mnt/app-etc /mnt/var /mnt/generated
+            chmod -R 775 /mnt/app-etc /mnt/var /mnt/generated
+
+            echo "Bootstrap completed."
+        volumeMounts:
+        - name: magento-app-etc
+          mountPath: /mnt/app-etc
+        - name: magento-var
+          mountPath: /mnt/var
+        - name: magento-generated
+          mountPath: /mnt/generated
+
+      containers:
+      - name: magento
+        image: alexcheng/magento2:2.1
+        imagePullPolicy: Always
+
+        ports:
+        - containerPort: 80
+
+        # POUR HPA
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+        env:
+        - name: MAGENTO_DATABASE_HOST
+          value: mariadb
+        - name: MAGENTO_DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: mariadb-database
+        - name: MAGENTO_DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: mariadb-user
+        - name: MAGENTO_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mariadb-secret
+              key: mariadb-password
+        - name: MAGENTO_HOST
+          value: magento.local
+
+        volumeMounts:
+        - name: magento-app-etc
+          mountPath: /var/www/html/app/etc
+        - name: magento-var
+          mountPath: /var/www/html/var
+        - name: magento-generated
+          mountPath: /var/www/html/generated
+
+      volumes:
+      - name: magento-app-etc
+        persistentVolumeClaim:
+          claimName: magento-app-etc-pvc
+      - name: magento-var
+        persistentVolumeClaim:
+          claimName: magento-var-pvc
+      - name: magento-generated
+        persistentVolumeClaim:
+          claimName: magento-generated-pvc
