@@ -126,18 +126,6 @@ kubectl rollout restart deployment magento -n magento
 - **With gate:** 0% errors – gate blocks the deployment until conditions improve
 - **Fast-starting apps (Nginx):** <0.1% errors even without the gate, because the ~2s startup time is too short for queues to build up
 
-## Citation
-
-If you use this work, please cite:
-
-```bibtex
-@article{naji2026runtime,
-  title={Runtime-Aware Deployment Gates for Cloud-Native Applications: 
-         Preventing Service Degradation in Kubernetes Environments},
-  author={Naji, Zineb and Ait Lahcen, Ayoub},
-  journal={[Not Yet]},
-  year={2026}
-}
 ```
 
 ## License
